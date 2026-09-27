@@ -1,3 +1,4 @@
+// Modified by NooviCrew. This file was changed from the upstream WAHA work (Apache License, Version 2.0, section 4(b)).
 // Jest loads CommonJS. @adiwajshing/baileys is ESM and pulls the Wasm bridge,
 // which has no require export. The unit tests that import it only need message
 // unwrapping and the protocol enums used by src/core/utils/pwa.ts.

@@ -1,3 +1,4 @@
+// Modified by NooviCrew. This file was changed from the upstream WAHA work (Apache License, Version 2.0, section 4(b)).
 import knex, { Knex } from 'knex';
 
 import { PhoneNumbersCacheRepository } from './PhoneNumbersCacheRepository';
