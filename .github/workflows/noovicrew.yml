@@ -35,3 +35,52 @@ jobs:
 
       - name: Run unit tests
         run: yarn test:unit
+
+  scan:
+    runs-on: ubuntu-latest
+    name: Vulnerability and secret scan
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Scan this branch
+        run: |
+          mkdir -p "$RUNNER_TEMP/trivy-out"
+          docker run --rm \
+            -v "$PWD:/src:ro" \
+            -v "$RUNNER_TEMP/trivy-out:/out" \
+            aquasec/trivy:0.66.0 \
+            --version
+          docker run --rm \
+            -v "$PWD:/src:ro" \
+            -v "$RUNNER_TEMP/trivy-out:/out" \
+            aquasec/trivy:0.66.0 \
+            fs --scanners vuln --exit-code 0 --format json --output /out/branch-vuln.json /src
+          docker run --rm \
+            -v "$PWD:/src:ro" \
+            -v "$RUNNER_TEMP/trivy-out:/out" \
+            aquasec/trivy:0.66.0 \
+            fs --scanners secret --exit-code 0 --format json --output /out/branch-secrets.json /src
+          python3 - "$RUNNER_TEMP/trivy-out" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          out = Path(sys.argv[1])
+
+          def counts(path):
+              data = json.loads(path.read_text())
+              vulns = {}
+              secrets = 0
+              for result in data.get("Results") or []:
+                  for vuln in result.get("Vulnerabilities") or []:
+                      severity = vuln.get("Severity", "UNKNOWN")
+                      vulns[severity] = vulns.get(severity, 0) + 1
+                  secrets += len(result.get("Secrets") or [])
+              return vulns, secrets
+
+          vuln_counts, _ = counts(out / "branch-vuln.json")
+          _, secret_count = counts(out / "branch-secrets.json")
+          print(f"trivy fs vuln findings={vuln_counts}")
+          print(f"trivy fs secret findings={secret_count}")
+          PY
