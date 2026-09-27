@@ -44,29 +44,8 @@ RUN if [ "$(uname -m)" = "x86_64" ]; then \
     fi
 
 #
-# Dashboard
-#
-FROM node:${NODE_IMAGE_TAG} AS dashboard
-
-# jq to parse json
-RUN apt-get update && apt-get install -y jq && rm -rf /var/lib/apt/lists/*
-
-# wget, unzip
-RUN apt-get update && apt-get install -y wget unzip && rm -rf /var/lib/apt/lists/*
-
-COPY waha.config.json /tmp/waha.config.json
-RUN \
-    WAHA_DASHBOARD_GITHUB_REPO=$(jq -r '.waha.dashboard.repo' /tmp/waha.config.json) && \
-    WAHA_DASHBOARD_SHA=$(jq -r '.waha.dashboard.ref' /tmp/waha.config.json) && \
-    wget https://github.com/${WAHA_DASHBOARD_GITHUB_REPO}/archive/${WAHA_DASHBOARD_SHA}.zip \
-    && unzip ${WAHA_DASHBOARD_SHA}.zip -d /tmp/dashboard \
-    && mkdir -p /dashboard \
-    && mv /tmp/dashboard/dashboard-${WAHA_DASHBOARD_SHA}/* /dashboard/ \
-    && rm -rf ${WAHA_DASHBOARD_SHA}.zip \
-    && rm -rf /tmp/dashboard/dashboard-${WAHA_DASHBOARD_SHA}
-
-#
 # GOWS
+# Prebuilt release binary. This image does not compile it.
 #
 FROM golang:${GOLANG_IMAGE_TAG} AS gows
 
@@ -84,15 +63,19 @@ RUN apt-get update  \
 
 COPY waha.config.json /tmp/waha.config.json
 WORKDIR /go/gows
+# sha256 of the v1.0.47 release assets, computed from the downloaded bytes.
+ARG GOWS_SHA256_AMD64=d9056d39e9b89df1fc59c7679a90493d3645370dd1e19da883515e58efa9d4c9
+ARG GOWS_SHA256_ARM64=755289362b6b7ddd90e5e53c1e8016e54df755e8d98fc1c763a42f0bb74ad1b8
 RUN \
     GOWS_GITHUB_REPO=$(jq -r '.waha.gows.repo' /tmp/waha.config.json) && \
     GOWS_SHA=$(jq -r '.waha.gows.ref' /tmp/waha.config.json) && \
     ARCH=$(uname -m) && \
-    if [ "$ARCH" = "x86_64" ]; then ARCH="amd64"; \
-    elif [ "$ARCH" = "aarch64" ]; then ARCH="arm64"; \
+    if [ "$ARCH" = "x86_64" ]; then ARCH="amd64"; EXPECTED="$GOWS_SHA256_AMD64"; \
+    elif [ "$ARCH" = "aarch64" ]; then ARCH="arm64"; EXPECTED="$GOWS_SHA256_ARM64"; \
     else echo "Unsupported architecture: $ARCH" && exit 1; fi && \
     mkdir -p /go/gows/bin && \
     wget -O /go/gows/bin/gows https://github.com/${GOWS_GITHUB_REPO}/releases/download/${GOWS_SHA}/gows-${ARCH} && \
+    echo "${EXPECTED}  /go/gows/bin/gows" | sha256sum -c - && \
     chmod +x /go/gows/bin/gows
 
 
@@ -181,6 +164,7 @@ RUN if [ "$USE_BROWSER" = "chromium" ]; then \
 # https://www.ubuntuupdates.org/package/google_chrome/stable/main/base/google-chrome-stable
 ARG CHROME_VERSION="152.0.7977.82-1"
 ARG OPUSTAGS_VERSION="1.10.1"
+ARG OPUSTAGS_SHA256=703096e9c41481e30ab90eefdd8fafc4c3a138998b3f8281aa4f023e7058bc86
 RUN if [ "$USE_BROWSER" = "chrome" ]; then \
         wget --no-verbose -O /tmp/chrome.deb https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_${CHROME_VERSION}_amd64.deb \
           && apt-get update \
@@ -200,8 +184,10 @@ RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ${buildDeps}; \
     mkdir -p /tmp/opustags; \
-    curl -L https://github.com/fmang/opustags/archive/refs/tags/${OPUSTAGS_VERSION}.tar.gz \
-      | tar -xz -C /tmp/opustags; \
+    curl -fsSL -o /tmp/opustags.tar.gz "https://github.com/fmang/opustags/archive/refs/tags/${OPUSTAGS_VERSION}.tar.gz"; \
+    echo "${OPUSTAGS_SHA256}  /tmp/opustags.tar.gz" | sha256sum -c -; \
+    tar -xzf /tmp/opustags.tar.gz -C /tmp/opustags; \
+    rm -f /tmp/opustags.tar.gz; \
     cd /tmp/opustags/opustags-${OPUSTAGS_VERSION}; \
     cmake -S . -B build -DCMAKE_INSTALL_PREFIX=/usr/local -DCMAKE_BUILD_TYPE=Release; \
     cmake --build build --config Release; \
@@ -227,7 +213,6 @@ WORKDIR /app
 COPY package.json ./
 COPY --from=build /git/node_modules ./node_modules
 COPY --from=build /git/dist ./dist
-COPY --from=dashboard /dashboard ./dist/dashboard
 COPY --from=gows /go/gows/bin/gows /app/gows
 COPY .env.example ./.env.example
 COPY scripts/init-waha.js ./scripts/init-waha.js
