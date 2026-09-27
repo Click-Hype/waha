@@ -181,7 +181,8 @@
         ],
         "rootDir": "src",
         "moduleNameMapper": {
-          "^@waha/(.*)$": "<rootDir>/$1"
+          "^@waha/(.*)$": "<rootDir>/$1",
+          "^@adiwajshing/baileys$": "<rootDir>/../jest/baileys.cjs"
         },
         "testRegex": ".test.ts$",
         "testPathIgnorePatterns": [

@@ -43,6 +43,10 @@ function buildSession(): TestSession {
     loggerBuilder: { child: () => logger },
     sessionStore: null,
     mediaManager: null,
+    media: {
+      api: { download: false, mimetypes: [] },
+      events: { download: false, mimetypes: [] },
+    },
     sessionConfig: null,
     engineConfig: null,
     ignore: {},

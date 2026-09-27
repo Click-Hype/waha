@@ -1,0 +1,36 @@
+# Tests for the NooviCrew branch. Upstream leaves this job commented out in
+# .github/workflows/dev.yaml; the command is the one that file and package.json
+# already name: yarn test:unit (package.json "test" is that script).
+
+name: noovicrew
+
+on:
+  push:
+    branches:
+      - noovicrew/2026.9.1
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    name: Unit tests
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Enable Corepack
+        run: |
+          corepack enable
+          corepack prepare yarn@4.17.1 --activate
+
+      - name: Install dependencies
+        run: |
+          unset GIT_CONFIG_PARAMETERS
+          yarn install --immutable
+
+      - name: Run unit tests
+        run: yarn test:unit
