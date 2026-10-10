@@ -158,7 +158,7 @@ async function nodeTlsSnapshot() {
     libraries.push({ name, path: real, sha256: hash(await nodeTlsFile(real, 32 * 1024 * 1024)) });
   }
   fact(systemTlsMapped(await fs.readFile('/proc/self/maps', 'utf8'), libraries.map(item => item.path)));
-  const apk = spawnSync('apk', ['info', '-v', 'libssl3', 'libcrypto3'], { encoding: 'utf8', timeout: 5000, maxBuffer: 8192 });
+  const apk = spawnSync('apk', ['info', '-e', '-v', 'libssl3', 'libcrypto3'], { encoding: 'utf8', timeout: 5000, maxBuffer: 8192 });
   fact(!apk.error && apk.status === 0 && apk.stderr === '');
   fact(JSON.stringify(apk.stdout.trim().split('\n').sort()) === '["libcrypto3-3.5.9-r0","libssl3-3.5.9-r0"]');
   const base = '/usr/share/noovicrew/node-shared-openssl';

@@ -62,7 +62,6 @@ WORKDIR /source
 COPY --from=build_sources node-v24.21.0.tar.xz node-v24.21.0-SHASUMS256.txt node-v24.21.0-SHASUMS256.txt.sig ./
 COPY --from=build_recipe trust/node.gpg ./node.gpg
 COPY --from=build_recipe node/source.json /usr/share/noovicrew/node-shared-openssl/source.json
-COPY build/native-tests/check-native.cjs /node-proof.cjs
 RUN --network=none printf '%s  %s\n' 'a6f54defb6fd7c84f41dba13d61e78e9b4e0961712cf61f29715c05f5ced94fc' node-v24.21.0.tar.xz 'f410428039e2c922a14058df067a4482691c9304a5c01a75847f9f3f2d3307f6' node-v24.21.0-SHASUMS256.txt '865f22b026e4080554e10d247553fd770573893dac8fc7affc7d58b72de35a89' node-v24.21.0-SHASUMS256.txt.sig '067260a186848e8e35937eb8b1a3d5649d204f0153274b5f844b762dc5cea77a' node.gpg | sha256sum -c - \
     && gpgv --keyring ./node.gpg node-v24.21.0-SHASUMS256.txt.sig node-v24.21.0-SHASUMS256.txt \
     && grep -Fx 'a6f54defb6fd7c84f41dba13d61e78e9b4e0961712cf61f29715c05f5ced94fc  node-v24.21.0.tar.xz' node-v24.21.0-SHASUMS256.txt \
@@ -73,14 +72,21 @@ RUN --network=none printf '%s  %s\n' 'a6f54defb6fd7c84f41dba13d61e78e9b4e0961712
     && test -f deps/icu-small/source/data/in/icudt78l.dat.bz2 \
     && CFLAGS='-O2 -pipe -march=x86-64 -mtune=generic' CXXFLAGS='-O2 -pipe -march=x86-64 -mtune=generic' ./configure --prefix=/usr/local --shared-openssl --shared-openssl-includes=/usr/include --shared-openssl-libpath=/usr/lib \
     && make -j4 \
-    && make install \
+    && make install
+
+# Keep even packaging failures outside the expensive compilation cache boundary.
+RUN --network=none cd /usr/src/node \
     && cp config.gypi /usr/share/noovicrew/node-shared-openssl/config.gypi \
     && mkdir -p /out \
-    && node /node-proof.cjs --node-tls-record > /out/node-provenance.json \
     && cp /usr/local/bin/node /out/node \
     && cp -a /usr/local/include/node /out/include \
     && cp LICENSE /out/LICENSE \
     && cp /usr/share/noovicrew/node-shared-openssl/config.gypi /out/config.gypi
+
+# Cache the completed compilation independently of the proof source and its refusal.
+COPY build/native-tests/check-native.cjs /node-proof.cjs
+RUN --network=none node /node-proof.cjs --node-tls-record > /out/node-provenance.json \
+    || { proof_status=$?; cat /out/node-provenance.json; exit "$proof_status"; }
 
 FROM ${NODE_IMAGE} AS build
 ENV PUPPETEER_SKIP_DOWNLOAD=True PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=True \
