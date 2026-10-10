@@ -43,6 +43,158 @@ function systemVipsMapped(maps) {
     && paths.every(name => !name.includes('@img/'));
 }
 
+// Additional proof, independent of the seven unchanged native checks below.
+// No subprocess shell, network, provider, environment or raw map is exported.
+function nodeNeededLibraries(bytes) {
+  fact(Buffer.isBuffer(bytes) && bytes.length >= 64 && bytes.length <= 256 * 1024 * 1024);
+  fact(bytes.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46])));
+  fact(bytes[4] === 2 && bytes[5] === 1 && bytes[6] === 1 && bytes.readUInt16LE(18) === 62);
+  const integer = value => { fact(value <= BigInt(Number.MAX_SAFE_INTEGER)); return Number(value); };
+  const range = (offset, length) => { fact(offset >= 0 && length >= 0 && offset + length <= bytes.length); };
+  const start = integer(bytes.readBigUInt64LE(32));
+  const stride = bytes.readUInt16LE(54);
+  const count = bytes.readUInt16LE(56);
+  fact(stride === 56 && count > 0 && count <= 256);
+  range(start, stride * count);
+  const segments = [];
+  for (let i = 0; i < count; i++) {
+    const base = start + stride * i;
+    const segment = { type: bytes.readUInt32LE(base), offset: integer(bytes.readBigUInt64LE(base + 8)),
+      address: integer(bytes.readBigUInt64LE(base + 16)), size: integer(bytes.readBigUInt64LE(base + 32)) };
+    range(segment.offset, segment.size);
+    segments.push(segment);
+  }
+  const dynamic = segments.filter(segment => segment.type === 2);
+  fact(dynamic.length === 1 && dynamic[0].size % 16 === 0 && dynamic[0].size <= 1024 * 1024);
+  const needed = [];
+  let stringAddress = null, stringSize = null, ended = false;
+  for (let pos = dynamic[0].offset; pos < dynamic[0].offset + dynamic[0].size; pos += 16) {
+    const tag = integer(bytes.readBigUInt64LE(pos));
+    const value = integer(bytes.readBigUInt64LE(pos + 8));
+    if (tag === 0) { ended = true; break; }
+    if (tag === 1) needed.push(value);
+    if (tag === 5) { fact(stringAddress === null); stringAddress = value; }
+    if (tag === 10) { fact(stringSize === null); stringSize = value; }
+  }
+  fact(ended && stringAddress !== null && stringSize > 0 && stringSize <= 8 * 1024 * 1024);
+  fact(needed.length > 0 && needed.length <= 64);
+  const tableSegments = segments.filter(segment => segment.type === 1 && segment.address <= stringAddress
+    && stringAddress + stringSize <= segment.address + segment.size);
+  fact(tableSegments.length === 1);
+  const table = tableSegments[0].offset + stringAddress - tableSegments[0].address;
+  range(table, stringSize);
+  const names = needed.map(offset => {
+    fact(offset < stringSize);
+    const end = bytes.indexOf(0, table + offset);
+    fact(end >= table + offset && end < table + stringSize && end - table - offset <= 128);
+    const name = bytes.toString('utf8', table + offset, end);
+    fact(/^[A-Za-z0-9_+.-]+$/.test(name));
+    return name;
+  });
+  fact(new Set(names).size === names.length);
+  return names.sort();
+}
+
+function nodeTlsIdentity(versions, shared, platform, arch) {
+  return versions !== null && typeof versions === 'object' && versions.node === '24.21.0' && versions.modules === '137' && versions.openssl === '3.5.9'
+    && shared === true && platform === 'linux' && arch === 'x64';
+}
+
+function systemTlsMapped(maps, expected) {
+  if (typeof maps !== 'string' || maps.length === 0 || maps.length > 8 * 1024 * 1024) return false;
+  if (!Array.isArray(expected) || expected.length !== 2 || new Set(expected).size !== 2
+      || !expected.every(name => /^\/usr\/lib\/lib(?:ssl|crypto)\.so\.3(?:\.\d+)*$/.test(name))) return false;
+  const found = new Set();
+  for (const line of maps.trim().split('\n')) {
+    const match = /^[0-9a-f]+-[0-9a-f]+ [rwx-]{3}[ps] [0-9a-f]+ [0-9a-f]+:[0-9a-f]+ \d+(?: +(.+))?$/.exec(line.trim());
+    if (!match) return false;
+    const name = match[1];
+    if (name && /(?:^|\/)lib(?:ssl|crypto)\.so(?:\.|$)/.test(name)) {
+      if (!expected.includes(name)) return false;
+      found.add(name);
+    }
+  }
+  return expected.every(name => found.has(name));
+}
+
+async function nodeTlsFile(filename, bound) {
+  const { constants } = require('node:fs');
+  const handle = await fs.open(filename, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const stat = await handle.stat();
+    fact(stat.isFile() && stat.size > 0 && stat.size <= bound);
+    const bytes = await handle.readFile();
+    fact(bytes.length === stat.size);
+    return bytes;
+  } finally { await handle.close(); }
+}
+
+async function nodeTlsSnapshot() {
+  const crypto = require('node:crypto');
+  const tls = require('node:tls');
+  fact(nodeTlsIdentity(process.versions, process.config.variables.node_shared_openssl, process.platform, process.arch));
+  fact(process.config.variables.icu_small === false);
+  fact(Intl.NumberFormat.supportedLocalesOf(['pt-BR', 'de-DE', 'ja-JP', 'ar-EG']).length === 4);
+  fact(Intl.DateTimeFormat.supportedLocalesOf(['pt-BR', 'de-DE', 'ja-JP', 'ar-EG']).length === 4);
+  tls.createSecureContext({ minVersion: 'TLSv1.2', maxVersion: 'TLSv1.3' });
+  const key = Buffer.alloc(32, 19), iv = Buffer.alloc(12, 23), plain = Buffer.from('synthetic-offline-node-crypto');
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const encrypted = Buffer.concat([cipher.update(plain), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAuthTag(tag);
+  fact(Buffer.concat([decipher.update(encrypted), decipher.final()]).equals(plain));
+  const wrong = crypto.createDecipheriv('aes-256-gcm', key, iv);
+  const badTag = Buffer.from(tag); badTag[0] ^= 1;
+  wrong.setAuthTag(badTag); wrong.update(encrypted); denies(() => wrong.final());
+  const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
+  const binary = await nodeTlsFile(await fs.realpath(process.execPath), 256 * 1024 * 1024);
+  const needed = nodeNeededLibraries(binary);
+  fact(needed.includes('libssl.so.3') && needed.includes('libcrypto.so.3'));
+  const libraries = [];
+  for (const name of ['libcrypto.so.3', 'libssl.so.3']) {
+    const real = await fs.realpath('/usr/lib/' + name);
+    fact(new RegExp('^/usr/lib/' + name.replaceAll('.', '\\.') + '(?:\\.\\d+)*$').test(real));
+    libraries.push({ name, path: real, sha256: hash(await nodeTlsFile(real, 32 * 1024 * 1024)) });
+  }
+  fact(systemTlsMapped(await fs.readFile('/proc/self/maps', 'utf8'), libraries.map(item => item.path)));
+  const apk = spawnSync('apk', ['info', '-v', 'libssl3', 'libcrypto3'], { encoding: 'utf8', timeout: 5000, maxBuffer: 8192 });
+  fact(!apk.error && apk.status === 0 && apk.stderr === '');
+  fact(JSON.stringify(apk.stdout.trim().split('\n').sort()) === '["libcrypto3-3.5.9-r0","libssl3-3.5.9-r0"]');
+  const base = '/usr/share/noovicrew/node-shared-openssl';
+  const sourceBytes = await nodeTlsFile(base + '/source.json', 16384);
+  const source = JSON.parse(sourceBytes);
+  fact(source.schema === 1 && source.node_version === '24.21.0' && source.modules === '137'
+    && source.source_sha256 === 'a6f54defb6fd7c84f41dba13d61e78e9b4e0961712cf61f29715c05f5ced94fc'
+    && source.openssl_apk === '3.5.9-r0' && source.make_jobs === 4);
+  fact(JSON.stringify(source.configure) === '["--prefix=/usr/local","--shared-openssl","--shared-openssl-includes=/usr/include","--shared-openssl-libpath=/usr/lib"]');
+  const config = await nodeTlsFile(base + '/config.gypi', 1024 * 1024);
+  fact(config.toString('utf8').includes("'node_shared_openssl': 'true'") || config.toString('utf8').includes("'node_shared_openssl': True"));
+  return { format: 'noovicrew-node-shared-openssl-provenance-v1', source_sha256: source.source_sha256,
+    source_descriptor_sha256: hash(sourceBytes), generated_config_sha256: hash(config), binary_sha256: hash(binary),
+    node_version: process.versions.node, modules: process.versions.modules, openssl_version: process.versions.openssl,
+    needed, libraries, shared_openssl: true, full_icu_checked: true, icu_version: process.versions.icu,
+    offline_aes_gcm_checked: true, real_qr_checked: false,
+    provider_homologated: false, security_approved: false, production_approved: false };
+}
+
+async function nodeTlsProof(record) {
+  fact(process.argv.length === 3);
+  const actual = await nodeTlsSnapshot();
+  if (record) return actual;
+  const stored = JSON.parse(await nodeTlsFile('/usr/share/noovicrew/node-shared-openssl/provenance.json', 16384));
+  fact(nodeTlsSameProvenance(actual, stored));
+  return { format: 'noovicrew-node-shared-openssl-check-v1', passed: true, node_version: actual.node_version,
+    modules: actual.modules, openssl_version: actual.openssl_version, binary_sha256: actual.binary_sha256,
+    needed: actual.needed, libraries: actual.libraries, provenance_rechecked: true, production_approved: false };
+}
+
+function nodeTlsSameProvenance(actual, stored) {
+  return actual !== null && stored !== null && typeof actual === 'object' && typeof stored === 'object'
+    && JSON.stringify(actual) === JSON.stringify(stored);
+}
+
+
 async function main() {
   fact(process.version === 'v24.21.0' && process.arch === 'x64' && process.platform === 'linux');
   process.env.WHATSAPP_DEFAULT_ENGINE = 'NOWEB';
@@ -194,6 +346,18 @@ async function main() {
   return { library_abi_and_local_media_checked: true };
 }
 
+if (require.main !== module) {
+  for (const [key, value] of Object.entries(original)) console[key] = value;
+  module.exports = { nodeNeededLibraries, nodeTlsIdentity, systemTlsMapped, nodeTlsSameProvenance };
+} else if (process.argv[2] === '--node-tls-record' || process.argv[2] === '--node-tls-check') {
+  nodeTlsProof(process.argv[2] === '--node-tls-record').then(proof => {
+    process.stdout.write(JSON.stringify(proof) + '\n');
+  }).catch(() => {
+    process.stdout.write(JSON.stringify({ format: 'noovicrew-node-shared-openssl-check-v1', passed: false,
+      failure: 'node-tls-proof-failed', production_approved: false }) + '\n');
+    process.exitCode = 1;
+  });
+} else {
 main().then(limits => {
   for (const [key, value] of Object.entries(original)) console[key] = value;
   process.stdout.write(JSON.stringify({ format: 'noovicrew-private-waha-native-checks-v1', cases: results,
@@ -205,3 +369,4 @@ main().then(limits => {
     vendor_events_redacted: vendorEvents, failed: true, media_failed_step: mediaSubstep, production_approved: false }) + '\n');
   process.exitCode = 1;
 });
+}

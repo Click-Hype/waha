@@ -54,6 +54,34 @@ RUN printf '%s  %s\n' '8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a
     && cp /root/packages/build/x86_64/ffmpeg-9.0.2-r1.apk /out/ \
     && cp /root/.abuild/*.rsa.pub /out/
 
+# Rebuild the same Node release and ABI against genuine corrected system OpenSSL.
+FROM ${ALPINE_IMAGE} AS node-shared-openssl
+RUN apk add --no-cache build-base=0.5-r4 python3 linux-headers gnupg xz=5.8.4-r0 \
+    libssl3=3.5.9-r0 libcrypto3=3.5.9-r0 openssl-dev=3.5.9-r0
+WORKDIR /source
+COPY --from=build_sources node-v24.21.0.tar.xz node-v24.21.0-SHASUMS256.txt node-v24.21.0-SHASUMS256.txt.sig ./
+COPY --from=build_recipe trust/node.gpg ./node.gpg
+COPY --from=build_recipe node/source.json /usr/share/noovicrew/node-shared-openssl/source.json
+COPY build/native-tests/check-native.cjs /node-proof.cjs
+RUN --network=none printf '%s  %s\n' 'a6f54defb6fd7c84f41dba13d61e78e9b4e0961712cf61f29715c05f5ced94fc' node-v24.21.0.tar.xz 'f410428039e2c922a14058df067a4482691c9304a5c01a75847f9f3f2d3307f6' node-v24.21.0-SHASUMS256.txt '865f22b026e4080554e10d247553fd770573893dac8fc7affc7d58b72de35a89' node-v24.21.0-SHASUMS256.txt.sig '067260a186848e8e35937eb8b1a3d5649d204f0153274b5f844b762dc5cea77a' node.gpg | sha256sum -c - \
+    && gpgv --keyring ./node.gpg node-v24.21.0-SHASUMS256.txt.sig node-v24.21.0-SHASUMS256.txt \
+    && grep -Fx 'a6f54defb6fd7c84f41dba13d61e78e9b4e0961712cf61f29715c05f5ced94fc  node-v24.21.0.tar.xz' node-v24.21.0-SHASUMS256.txt \
+    && mkdir -p /usr/src/node \
+    && tar -xJf node-v24.21.0.tar.xz -C /usr/src/node --strip-components=1 \
+    && cd /usr/src/node \
+    && test -f deps/icu-small/README-FULL-ICU.txt \
+    && test -f deps/icu-small/source/data/in/icudt78l.dat.bz2 \
+    && CFLAGS='-O2 -pipe -march=x86-64 -mtune=generic' CXXFLAGS='-O2 -pipe -march=x86-64 -mtune=generic' ./configure --prefix=/usr/local --shared-openssl --shared-openssl-includes=/usr/include --shared-openssl-libpath=/usr/lib \
+    && make -j4 \
+    && make install \
+    && cp config.gypi /usr/share/noovicrew/node-shared-openssl/config.gypi \
+    && mkdir -p /out \
+    && node /node-proof.cjs --node-tls-record > /out/node-provenance.json \
+    && cp /usr/local/bin/node /out/node \
+    && cp -a /usr/local/include/node /out/include \
+    && cp LICENSE /out/LICENSE \
+    && cp /usr/share/noovicrew/node-shared-openssl/config.gypi /out/config.gypi
+
 FROM ${NODE_IMAGE} AS build
 ENV PUPPETEER_SKIP_DOWNLOAD=True PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=True \
     YARN_CHECKSUM_BEHAVIOR=throw YARN_ENABLE_IMMUTABLE_INSTALLS=true
@@ -61,7 +89,10 @@ COPY --from=expat-package /out/*.rsa.pub /etc/apk/keys/
 COPY --from=vips-package /out/*.rsa.pub /etc/apk/keys/
 COPY --from=expat-package /out/libexpat-2.9.0-r0.apk /out/expat-2.9.0-r0.apk /out/expat-dev-2.9.0-r0.apk /tmp/native/
 COPY --from=vips-package /out/vips-8.18.7-r0.apk /out/vips-dev-8.18.7-r0.apk /tmp/native/
-RUN apk add --no-cache /tmp/native/*.apk git python3 build-base=0.5-r4 pkgconf=2.5.1-r0
+COPY --from=node-shared-openssl /out/node /usr/local/bin/node
+RUN test -d /usr/local/include/node && rm -r /usr/local/include/node
+COPY --from=node-shared-openssl /out/include/ /usr/local/include/node/
+RUN apk add --no-cache /tmp/native/*.apk git python3 build-base=0.5-r4 pkgconf=2.5.1-r0 libssl3=3.5.9-r0 libcrypto3=3.5.9-r0
 WORKDIR /build-tools
 COPY build/native-tests/builder-tools.package.json ./package.json
 RUN npm install --no-audit --no-fund \
@@ -110,7 +141,10 @@ COPY --from=ffmpeg-package /out/*.rsa.pub /etc/apk/keys/
 COPY --from=expat-package /out/libexpat-2.9.0-r0.apk /tmp/native/
 COPY --from=vips-package /out/vips-8.18.7-r0.apk /out/vips-doc-8.18.7-r0.apk /tmp/native/
 COPY --from=ffmpeg-package /out/ffmpeg-9.0.2-r1.apk /tmp/native/
-RUN apk add --no-cache /tmp/native/*.apk opustags=1.10.1-r0 tini=0.19.0-r3 ca-certificates \
+COPY --from=node-shared-openssl /out/node /usr/local/bin/node
+RUN test -d /usr/local/include/node && rm -r /usr/local/include/node
+COPY --from=node-shared-openssl /out/include/ /usr/local/include/node/
+RUN apk add --no-cache /tmp/native/*.apk opustags=1.10.1-r0 tini=0.19.0-r3 ca-certificates libssl3=3.5.9-r0 libcrypto3=3.5.9-r0 \
     && rm -r /tmp/native \
     && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /opt/yarn-v1.22.22 \
     && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/pnpm /usr/local/bin/pnpx /usr/local/bin/yarn /usr/local/bin/yarnpkg
@@ -123,6 +157,11 @@ COPY scripts/init-waha.js ./scripts/init-waha.js
 COPY build/runtime-profiles/noweb.env.example ./.env.example
 COPY scripts/entrypoint-noweb.sh /entrypoint.sh
 COPY --from=build /proofs/ /usr/share/noovicrew/build-provenance/
+COPY --from=build_recipe node/source.json /usr/share/noovicrew/node-shared-openssl/source.json
+COPY --from=node-shared-openssl /out/node-provenance.json /usr/share/noovicrew/node-shared-openssl/provenance.json
+COPY --from=node-shared-openssl /out/config.gypi /usr/share/noovicrew/node-shared-openssl/config.gypi
+COPY --from=node-shared-openssl /out/LICENSE /usr/share/noovicrew/node-shared-openssl/LICENSE
+COPY build/native-tests/check-native.cjs /usr/share/noovicrew/node-shared-openssl/check-native.cjs
 RUN chmod +x /entrypoint.sh ./scripts/init-waha.js \
     && printf '%s\n' '#!/bin/sh' 'exec node /app/scripts/init-waha.js "$@"' > /usr/local/bin/init-waha \
     && chmod +x /usr/local/bin/init-waha
@@ -134,7 +173,9 @@ COPY build/native-tests/check-native.cjs build/native-tests/crypto-vectors.cjs .
 RUN --network=none mkdir /proofs \
     && (node /app/noovicrew-tests/check-native.cjs > /proofs/native-checks.json \
         || { check_status=$?; cat /proofs/native-checks.json; exit "$check_status"; }) \
-    && node /app/noovicrew-tests/crypto-vectors.cjs > /proofs/crypto-vectors.json
+    && node /app/noovicrew-tests/crypto-vectors.cjs > /proofs/crypto-vectors.json \
+    && (node /usr/share/noovicrew/node-shared-openssl/check-native.cjs --node-tls-check > /proofs/node-tls.json \
+        || { check_status=$?; cat /proofs/node-tls.json; exit "$check_status"; })
 
 FROM app-runtime AS runtime-prototype
 COPY --from=checks /proofs/ /usr/share/noovicrew/offline-checks/
