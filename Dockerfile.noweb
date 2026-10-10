@@ -1,0 +1,140 @@
+# NooviCrew NOWEB profile. Legacy Dockerfile is preserved; channel homologation remains separate.
+ARG ALPINE_IMAGE
+ARG NODE_IMAGE
+FROM ${ALPINE_IMAGE} AS expat-package
+RUN apk add --no-cache abuild=3.17.0-r0 build-base=0.5-r4 bash gnupg xz=5.8.4-r0
+WORKDIR /build/expat
+COPY --from=build_recipe expat/APKBUILD ./APKBUILD
+COPY --from=build_recipe trust/expat.gpg ./expat.gpg
+COPY --from=build_sources expat-2.9.0.tar.xz expat-2.9.0.tar.xz.asc ./
+RUN printf '%s  %s\n' '1e6371862cc31999b368c3b89b49994f0677e1bab5f1b2b85ae3741f5d803051' expat-2.9.0.tar.xz | sha256sum -c - \
+    && gpgv --keyring ./expat.gpg expat-2.9.0.tar.xz.asc expat-2.9.0.tar.xz \
+    && PACKAGER='NooviCrew <noovicrew-expat@build.invalid>' abuild-keygen -a -n \
+    && cp /root/.abuild/*.rsa.pub /etc/apk/keys/ \
+    && abuild -F \
+    && mkdir -p /out \
+    && cp /root/packages/build/x86_64/*.apk /out/ \
+    && cp /root/.abuild/*.rsa.pub /out/ \
+    && tar -xOf expat-2.9.0.tar.xz expat-2.9.0/COPYING > /out/COPYING
+
+FROM ${ALPINE_IMAGE} AS vips-package
+COPY --from=expat-package /out/*.rsa.pub /etc/apk/keys/
+COPY --from=expat-package /out/libexpat-2.9.0-r0.apk /out/expat-2.9.0-r0.apk /out/expat-dev-2.9.0-r0.apk /tmp/expat/
+RUN apk add --no-cache /tmp/expat/*.apk abuild=3.17.0-r0 xz=5.8.4-r0
+WORKDIR /build/vips
+COPY --from=build_recipe vips/APKBUILD vips/meson-flags.txt ./
+COPY --from=build_recipe vips/source.json ./vips-source.json
+COPY --from=build_recipe expat/source.json ./expat-source.json
+COPY --from=build_sources vips-8.18.7.tar.xz ./
+RUN printf '%s  %s\n' '5baaead3b0bb20ffdb9e9ff09aa9fda08620923df77b63b436654cb5e0b3bf94' vips-8.18.7.tar.xz | sha256sum -c - \
+    && PACKAGER='NooviCrew <noovicrew-vips@build.invalid>' abuild-keygen -a -n \
+    && cp /root/.abuild/*.rsa.pub /etc/apk/keys/ \
+    && apk update \
+    && abuild -F -r \
+    && mkdir -p /out \
+    && cp /root/packages/build/x86_64/vips-8.18.7-r0.apk /root/packages/build/x86_64/vips-dev-8.18.7-r0.apk /root/packages/build/x86_64/vips-doc-8.18.7-r0.apk /out/ \
+    && cp /root/.abuild/*.rsa.pub /out/ \
+    && cp vips-source.json expat-source.json meson-flags.txt /out/ \
+    && tar -xOf vips-8.18.7.tar.xz vips-8.18.7/LICENSE > /out/LICENSE
+
+FROM ${ALPINE_IMAGE} AS ffmpeg-package
+RUN apk add --no-cache abuild=3.17.0-r0 build-base=0.5-r4 xz=5.8.4-r0 gnupg
+WORKDIR /build/ffmpeg
+COPY --from=build_recipe ffmpeg-waha/APKBUILD ffmpeg-waha/configure-flags.txt ./
+COPY --from=build_recipe ffmpeg-waha/source.json ./ffmpeg-source.json
+COPY --from=build_recipe trust/ffmpeg.gpg ./ffmpeg.gpg
+COPY --from=build_sources ffmpeg-9.0.2.tar.xz ffmpeg-9.0.2.tar.xz.asc ./
+RUN printf '%s  %s\n' '8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e' ffmpeg-9.0.2.tar.xz | sha256sum -c - \
+    && gpgv --keyring ./ffmpeg.gpg ffmpeg-9.0.2.tar.xz.asc ffmpeg-9.0.2.tar.xz \
+    && PACKAGER='NooviCrew <noovicrew-ffmpeg@build.invalid>' abuild-keygen -a -n \
+    && cp /root/.abuild/*.rsa.pub /etc/apk/keys/ \
+    && apk update \
+    && abuild -F -r \
+    && mkdir -p /out \
+    && cp /root/packages/build/x86_64/ffmpeg-9.0.2-r1.apk /out/ \
+    && cp /root/.abuild/*.rsa.pub /out/
+
+FROM ${NODE_IMAGE} AS build
+ENV PUPPETEER_SKIP_DOWNLOAD=True PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=True \
+    YARN_CHECKSUM_BEHAVIOR=throw YARN_ENABLE_IMMUTABLE_INSTALLS=true
+COPY --from=expat-package /out/*.rsa.pub /etc/apk/keys/
+COPY --from=vips-package /out/*.rsa.pub /etc/apk/keys/
+COPY --from=expat-package /out/libexpat-2.9.0-r0.apk /out/expat-2.9.0-r0.apk /out/expat-dev-2.9.0-r0.apk /tmp/native/
+COPY --from=vips-package /out/vips-8.18.7-r0.apk /out/vips-dev-8.18.7-r0.apk /tmp/native/
+RUN apk add --no-cache /tmp/native/*.apk git python3 build-base=0.5-r4 pkgconf=2.5.1-r0
+WORKDIR /build-tools
+COPY build/native-tests/builder-tools.package.json ./package.json
+RUN npm install --no-audit --no-fund \
+    && node -e 'if(require("node-gyp/package.json").version!=="12.4.0"||require("node-addon-api/package.json").version!=="8.9.2")process.exit(1)'
+WORKDIR /app
+COPY . ./
+COPY package.json yarn.lock ./
+COPY build/runtime-profiles/noweb.ts ./src/core/runtime-engine-profile.ts
+COPY build/native-tests/inventory.cjs /inventory.cjs
+RUN corepack yarn install --immutable --check-cache \
+    && sha256sum package.json yarn.lock > /tmp/descriptor-lock.sha256 \
+    && corepack yarn build \
+    && mkdir -p /proofs \
+    && node /inventory.cjs > /proofs/node-packages-before-focus.json \
+    && corepack yarn workspaces focus --all --production \
+    && sha256sum -c /tmp/descriptor-lock.sha256 \
+    && node /inventory.cjs > /proofs/node-packages-runtime.json
+# Only these two builder-tool symlinks are introduced, then removed. The genuine
+# production dependency graph and all engine import libraries remain intact.
+RUN mkdir -p node_modules/sharp/node_modules \
+    && test ! -e node_modules/sharp/node_modules/node-addon-api \
+    && test ! -e node_modules/sharp/node_modules/node-gyp \
+    && ln -s /build-tools/node_modules/node-addon-api node_modules/sharp/node_modules/node-addon-api \
+    && ln -s /build-tools/node_modules/node-gyp node_modules/sharp/node_modules/node-gyp \
+    && cd /app/node_modules/sharp \
+    && PATH="/build-tools/node_modules/.bin:$PATH" CFLAGS="-O2 -pipe -march=x86-64 -mtune=generic" CXXFLAGS="-O2 -pipe -march=x86-64 -mtune=generic" SHARP_FORCE_GLOBAL_LIBVIPS=1 node install/build.js \
+    && rm node_modules/node-addon-api node_modules/node-gyp \
+    && cd /app \
+    && cp /build-tools/package.json /proofs/native-builder-tools.package.json \
+    && cp /build-tools/package-lock.json /proofs/native-builder-tools.package-lock.json \
+    && cp package.json yarn.lock /proofs/
+
+FROM ${NODE_IMAGE} AS app-runtime
+ARG SOURCE_COMMIT
+LABEL org.opencontainers.image.revision=$SOURCE_COMMIT \
+    io.noovicrew.waha.fork-source=$SOURCE_COMMIT \
+    io.noovicrew.waha.runtime-engine="NOWEB" \
+    io.noovicrew.waha.profile-status="unhomologated"
+ENV WHATSAPP_DEFAULT_ENGINE=NOWEB WAHA_RUN_XVFB=false \
+    PUPPETEER_SKIP_DOWNLOAD=True PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=True \
+    NODE_OPTIONS="--max-old-space-size=1536" \
+    CHOKIDAR_USEPOLLING=1 CHOKIDAR_INTERVAL=5000
+COPY --from=expat-package /out/*.rsa.pub /etc/apk/keys/
+COPY --from=vips-package /out/*.rsa.pub /etc/apk/keys/
+COPY --from=ffmpeg-package /out/*.rsa.pub /etc/apk/keys/
+COPY --from=expat-package /out/libexpat-2.9.0-r0.apk /tmp/native/
+COPY --from=vips-package /out/vips-8.18.7-r0.apk /out/vips-doc-8.18.7-r0.apk /tmp/native/
+COPY --from=ffmpeg-package /out/ffmpeg-9.0.2-r1.apk /tmp/native/
+RUN apk add --no-cache /tmp/native/*.apk opustags=1.10.1-r0 tini=0.19.0-r3 ca-certificates \
+    && rm -r /tmp/native \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /opt/yarn-v1.22.22 \
+    && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/pnpm /usr/local/bin/pnpx /usr/local/bin/yarn /usr/local/bin/yarnpkg
+WORKDIR /app
+COPY --from=build /app/package.json /app/yarn.lock ./
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+COPY LICENSE ./LICENSE
+COPY scripts/init-waha.js ./scripts/init-waha.js
+COPY build/runtime-profiles/noweb.env.example ./.env.example
+COPY scripts/entrypoint-noweb.sh /entrypoint.sh
+COPY --from=build /proofs/ /usr/share/noovicrew/build-provenance/
+RUN chmod +x /entrypoint.sh ./scripts/init-waha.js \
+    && printf '%s\n' '#!/bin/sh' 'exec node /app/scripts/init-waha.js "$@"' > /usr/local/bin/init-waha \
+    && chmod +x /usr/local/bin/init-waha
+EXPOSE 3000
+ENTRYPOINT ["/sbin/tini", "--", "/entrypoint.sh"]
+
+FROM app-runtime AS checks
+COPY build/native-tests/check-native.cjs build/native-tests/crypto-vectors.cjs ./noovicrew-tests/
+RUN --network=none mkdir /proofs \
+    && (node /app/noovicrew-tests/check-native.cjs > /proofs/native-checks.json \
+        || { check_status=$?; cat /proofs/native-checks.json; exit "$check_status"; }) \
+    && node /app/noovicrew-tests/crypto-vectors.cjs > /proofs/crypto-vectors.json
+
+FROM app-runtime AS runtime-prototype
+COPY --from=checks /proofs/ /usr/share/noovicrew/offline-checks/

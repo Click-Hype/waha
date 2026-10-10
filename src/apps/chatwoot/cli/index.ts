@@ -21,8 +21,14 @@ export async function runText(
   // treat them as glob operators and return non-string tokens
   text = text.replace(/[*_~`]/g, '');
   const output = new BufferedOutput();
-  const program = BuildProgram(commands, ctx, output);
   const argv = parse(text);
+  if (
+    !argv.every((argument): argument is string => typeof argument === 'string')
+  ) {
+    output.writeErr('Unsupported shell syntax in command.\n');
+    return output;
+  }
+  const program = BuildProgram(commands, ctx, output);
   try {
     await program.parseAsync(argv, { from: 'user' });
   } catch (err) {

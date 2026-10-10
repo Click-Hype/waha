@@ -1,3 +1,4 @@
+import { requireEngineAvailable } from '@waha/core/runtime-engine-profile';
 import {
   Inject,
   Injectable,
@@ -258,6 +259,7 @@ export class SessionManagerCore
   }
 
   protected getEngine(engine: WAHAEngine): typeof WhatsappSession {
+    requireEngineAvailable(engine);
     if (engine === WAHAEngine.WEBJS) {
       this.SESSION_STOP_TIMEOUT = 3_000;
       return WhatsappSessionWebJSCore;

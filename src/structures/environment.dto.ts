@@ -11,6 +11,9 @@ export class WAHAEnvironment {
   })
   engine: string;
 
+  @ApiProperty({ description: 'Engines included in this artifact.', type: [String] })
+  supportedEngines: string[];
+
   @ApiProperty({
     example: 'PLUS',
   })

@@ -1,3 +1,4 @@
+import { SUPPORTED_ENGINES } from '@waha/core/runtime-engine-profile';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 import { getEngineName } from '@waha/config';
 
@@ -50,6 +51,7 @@ function getPlatform() {
 export const VERSION: WAHAEnvironment = {
   version: '2026.9.1',
   engine: getEngineName(),
+  supportedEngines: [...SUPPORTED_ENGINES],
   tier: getWAHAVersion(),
   browser: getBrowser(),
   platform: getPlatform(),

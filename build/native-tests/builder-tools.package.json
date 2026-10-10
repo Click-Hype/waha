@@ -1,0 +1,10 @@
+{
+  "name": "noovicrew-waha-native-build-tools",
+  "private": true,
+  "description": "Build-only genuine registry tools; excluded from runtime",
+  "version": "1.0.0",
+  "dependencies": {
+    "node-gyp": "12.4.0",
+    "node-addon-api": "8.9.2"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "format": "noovicrew-private-waha-genuine-lock-v1",
+  "node": "v24.21.0",
+  "platform": "linux",
+  "architecture": "x64",
+  "yarn": "4.17.1",
+  "package_sha256": "e2d0b9018e856a632691adb9a72c2f49505bc4730727e05657e68211014ca1ab",
+  "lock_sha256": "bfc7fa292bb5ba2241eeb4dbc0f89daf5a37ad939f1e8ed84b6a903a39f7b03f",
+  "provenance": "Yarn registry/Git resolver; immutable checksum replay",
+  "runtime_approved": false,
+  "vulnerabilities_resolved": false
+}

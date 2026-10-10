@@ -1,9 +1,9 @@
-import { WAHAEngine } from '@waha/structures/enums.dto';
+import { DEFAULT_ENGINE, requireEngineAvailable } from '@waha/core/runtime-engine-profile';
 
 export function getEngineName(): string {
-  //   Load engine name from WHATSAPP_DEFAULT_ENGINE environment variable
-  //   If not set - use WEBJS
-  return process.env.WHATSAPP_DEFAULT_ENGINE || WAHAEngine.WEBJS;
+  const engine = process.env.WHATSAPP_DEFAULT_ENGINE || DEFAULT_ENGINE;
+  requireEngineAvailable(engine);
+  return engine;
 }
 
 export function getNamespace(): string {
