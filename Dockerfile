@@ -64,9 +64,9 @@ RUN apt-get update  \
 
 COPY waha.config.json /tmp/waha.config.json
 WORKDIR /go/gows
-# sha256 of the v1.0.47 release assets, computed from the downloaded bytes.
-ARG GOWS_SHA256_AMD64=d9056d39e9b89df1fc59c7679a90493d3645370dd1e19da883515e58efa9d4c9
-ARG GOWS_SHA256_ARM64=755289362b6b7ddd90e5e53c1e8016e54df755e8d98fc1c763a42f0bb74ad1b8
+# v1.0.47 release asset digests verified against GitHub metadata and downloaded bytes.
+ARG GOWS_SHA256_AMD64=d42462189ed2c0fe65444e55cf5d213f3019724fa4b449a12c68dee925f21a6c
+ARG GOWS_SHA256_ARM64=f729e9d1731850a853e263e85c95e982b6fb0aa25dda18bac414c050b36c39e8
 RUN \
     GOWS_GITHUB_REPO=$(jq -r '.waha.gows.repo' /tmp/waha.config.json) && \
     GOWS_SHA=$(jq -r '.waha.gows.ref' /tmp/waha.config.json) && \
