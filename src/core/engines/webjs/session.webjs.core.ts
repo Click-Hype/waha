@@ -1,3 +1,4 @@
+// Modified by NooviCrew. This file was changed from the upstream WAHA work (Apache License, Version 2.0, section 4(b)).
 import { UnprocessableEntityException } from '@nestjs/common';
 import { parseMessageCapping } from '@waha/core/abc/capping';
 import {
@@ -835,7 +836,7 @@ export class WhatsappSessionWebJSCore extends WhatsappSession {
     // show it as ABCD-ABCD
     const parts = splitAt(code, 4);
     const codeRepr = parts.join('-');
-    this.logger.debug(`Your code: ${codeRepr}`);
+    this.logger.debug('Pairing code generated');
     return { code: codeRepr };
   }
 

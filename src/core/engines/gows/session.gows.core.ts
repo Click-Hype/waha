@@ -1,3 +1,4 @@
+// Modified by NooviCrew. This file was changed from the upstream WAHA work (Apache License, Version 2.0, section 4(b)).
 import {
   normalizeMessageContent,
   proto,
@@ -462,7 +463,7 @@ export class WhatsappSessionGoWSCore extends WhatsappSession {
         // The operator must see the code, verify it matches the one shown on
         // their phone, then confirm via POST .../auth/passkey/confirm.
         const code = data.PasskeyConfirmation?.Code ?? null;
-        this.logger.info({ code: code }, 'Passkey confirmation code');
+        this.logger.info('Passkey confirmation code received');
         this.setStatus(WAHASessionStatus.PASSKEY_CONFIRMATION_REQUIRED, {
           code: code,
         });
@@ -927,7 +928,7 @@ export class WhatsappSessionGoWSCore extends WhatsappSession {
     });
     const response = await promisify(this.client.RequestCode)(request);
     const code: string = response.toObject().code;
-    this.logger.info(`Your code: ${code}`);
+    this.logger.info('Pairing code generated');
     return { code: code };
   }
 

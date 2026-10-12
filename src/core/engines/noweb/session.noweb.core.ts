@@ -1,3 +1,4 @@
+// Modified by NooviCrew. This file was changed from the upstream WAHA work (Apache License, Version 2.0, section 4(b)).
 import makeWASocket, {
   Browsers,
   Chat,
@@ -998,12 +999,12 @@ export class WhatsappSessionNoWebCore extends WhatsappSession {
       throw new UnprocessableEntityException(err);
     }
 
-    this.logger.info(`Requesting pairing code for '${phoneNumber}'...`);
+    this.logger.info('Requesting pairing code...');
     const code: string = await this.sock.requestPairingCode(phoneNumber);
     // show it as ABCD-ABCD
     const parts = splitAt(code, 4);
     const codeRepr = parts.join('-');
-    this.logger.info(`Your code: ${codeRepr}`);
+    this.logger.info('Pairing code generated');
     return { code: codeRepr };
   }
 
