@@ -3,12 +3,17 @@
 //
 
 //
-// Local - sqlite3 engine
+// Local - SQLite engine
 //
-let KNEX_SQLITE_CLIENT = process.env.WAHA_SQLITE_ENGINE;
-if (KNEX_SQLITE_CLIENT != 'sqlite3' && KNEX_SQLITE_CLIENT != 'better-sqlite3') {
-  KNEX_SQLITE_CLIENT = 'sqlite3';
+// NooviCrew ships only better-sqlite3 (its bundled SQLite is kept patched); the
+// `sqlite3` package was removed, so WAHA_SQLITE_ENGINE=sqlite3 is refused at boot.
+if (
+  process.env.WAHA_SQLITE_ENGINE &&
+  process.env.WAHA_SQLITE_ENGINE != 'better-sqlite3'
+) {
+  throw new Error('WAHA_SQLITE_ENGINE must be better-sqlite3 in this build');
 }
+const KNEX_SQLITE_CLIENT = 'better-sqlite3';
 export { KNEX_SQLITE_CLIENT };
 
 //

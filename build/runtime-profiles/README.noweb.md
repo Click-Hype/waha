@@ -17,7 +17,7 @@ as vulnerabilidades corrigidas nem aprova o runtime. A build compila o grafo com
 faz focus de produção preservando os metadados/lock e usa Sharp compilado com Vips
 do sistema. Expat, Vips e FFmpeg mantêm pacotes genuínos, licenças, documentos e trust.
 
-Os checks obrigatórios usam arquivos e chaves sintéticos, sem rede: bindings SQLite,
+Os checks obrigatórios usam arquivos e chaves sintéticos, sem rede: binding better-sqlite3 (SQLite 3.53.2+, sem o pacote `sqlite3`),
 reabertura das migrations NOWEB, formatos de imagem, conversores reais de voz/vídeo
 e vetores do ratchet. A consulta do vendor Opus usa `opustags --vendor`, exigindo
 `Recorder` exato e ausência de comentários `ENCODER`. Falha impede a imagem final.

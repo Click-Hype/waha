@@ -2,6 +2,7 @@
 
 // Candidate-only offline checks. Output is closed case IDs and booleans.
 const fs = require('node:fs/promises');
+const fsSync = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
@@ -264,22 +265,20 @@ async function main() {
   });
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'noovicrew-native-'));
   try {
-    await check('sqlite3-and-better-sqlite3-bindings', async () => {
+    await check('better-sqlite3-binding-and-sqlite3-absent', async () => {
       const better = require('/app/node_modules/better-sqlite3');
       const db = new better(':memory:');
       try {
         db.exec('CREATE TABLE synthetic (value INTEGER)');
         db.prepare('INSERT INTO synthetic VALUES (?)').run(37);
         fact(db.prepare('SELECT value FROM synthetic').get().value === 37);
+        // The bundled SQLite must carry the fixes for CVE-2025-6965, CVE-2025-7709,
+        // CVE-2026-11822 and CVE-2026-11824 (3.53.2 or later).
+        const version = db.prepare('SELECT sqlite_version() AS v').get().v.split('.').map(Number);
+        fact(version[0] === 3 && (version[1] > 53 || (version[1] === 53 && version[2] >= 2)));
       } finally { db.close(); }
-      const sqlite = require('/app/node_modules/sqlite3');
-      const classic = await new Promise((resolve, reject) => {
-        const connection = new sqlite.Database(':memory:', error => error ? reject(error) : resolve(connection));
-      });
-      try {
-        const row = await new Promise((resolve, reject) => classic.get('SELECT 41 AS value', (error, value) => error ? reject(error) : resolve(value)));
-        fact(row.value === 41);
-      } finally { await new Promise((resolve, reject) => classic.close(error => error ? reject(error) : resolve())); }
+      // The classic `sqlite3` package (bundled SQLite 3.44.2) must not ship at all.
+      fact(!fsSync.existsSync('/app/node_modules/sqlite3'));
     });
     await check('noweb-sqlite-migrations-reopen', async () => {
       const esm = require('/app/dist/vendor/esm');

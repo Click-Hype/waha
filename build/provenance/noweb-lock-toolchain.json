@@ -4,8 +4,8 @@
   "platform": "linux",
   "architecture": "x64",
   "yarn": "4.17.1",
-  "package_sha256": "d9d381e5c8212c42534b3785c00c60f5981ed444cfb6242b8852b065e5df2b94",
-  "lock_sha256": "98e21ddae3f8ca7013c01817de024ca96086e4dc566584a2875f3f725bbc4a1d",
+  "package_sha256": "b17cb5f1ad4a08ad31e5621921b79d01098dc929d97fce7c260da1c3c87a25c7",
+  "lock_sha256": "01d198d28f00f466796641964aeb22b1f1a11dc779c0b49d2e1460547ba8af62",
   "provenance": "Yarn registry/Git resolver; immutable checksum replay",
   "runtime_approved": false,
   "vulnerabilities_resolved": false

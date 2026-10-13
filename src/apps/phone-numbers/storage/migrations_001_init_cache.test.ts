@@ -16,7 +16,7 @@ describe('migrations_001_init_cache', () => {
 
   beforeEach(async () => {
     db = knex({
-      client: 'sqlite3',
+      client: 'better-sqlite3',
       connection: { filename: ':memory:' },
       useNullAsDefault: true,
     });
