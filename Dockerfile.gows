@@ -128,9 +128,21 @@ RUN cd src && go mod download && go mod verify \
     && cd .. && mkdir -p src/proto \
     && protoc -I=. --go_out=./src/proto --go-grpc_out=./src/proto --experimental_allow_proto3_optional proto/*.proto
 # Compilation is separate from the proof so a refused proof does not discard the build cache.
-RUN cd src && mkdir -p /out && go build -p 2 -trimpath -buildvcs=false -ldflags='-s -w -buildid=' -o /out/gows .
+# The release tarball has no VCS data, so Go would stamp the main module as "(devel)" and scanners
+# could not match advisories against gows itself. A local, fixed-date repository tagged with the
+# pinned release lets Go stamp v1.0.49 (vcs.revision is this local snapshot, not upstream's commit,
+# which the tarball check above already proved).
+RUN --network=none cd src \
+    && git init -q && git add -A \
+    && GIT_AUTHOR_DATE=2026-10-16T00:00:00Z GIT_COMMITTER_DATE=2026-10-16T00:00:00Z \
+       git -c user.name=noovicrew-build -c user.email=build@noovicrew.invalid -c commit.gpgsign=false \
+       commit -q -m 'gows-plus 5f093fe7c38c41faead8e6ce78ee70cb7f815404 with NooviCrew go.mod overlay' \
+    && git -c tag.gpgsign=false tag v1.0.49 \
+    && test -z "$(git status --porcelain)"
+RUN cd src && mkdir -p /out && go build -p 2 -trimpath -buildvcs=true -ldflags='-s -w -buildid=' -o /out/gows .
 RUN --network=none cd /usr/src/gows \
     && go version -m /out/gows > /out/gows-buildinfo.txt \
+    && grep -Eq '^[[:space:]]+mod[[:space:]]+github.com/devlikeapro/gows[[:space:]]+v1\.0\.49[[:space:]]' /out/gows-buildinfo.txt \
     && grep -Eq '^[[:space:]]+build[[:space:]]+CGO_ENABLED=1$' /out/gows-buildinfo.txt \
     && grep -Eq '^[[:space:]]+dep[[:space:]]+google.golang.org/grpc[[:space:]]+v1\.83\.2[[:space:]]' /out/gows-buildinfo.txt \
     && grep -Eq '^[[:space:]]+dep[[:space:]]+github.com/jackc/pgx/v5[[:space:]]+v5\.9\.2[[:space:]]' /out/gows-buildinfo.txt \
