@@ -1,0 +1,248 @@
+# NooviCrew GOWS profile: the WAHA fork plus gows-plus compiled from verified source.
+# Derived from Dockerfile.noweb (same Node, OpenSSL, Vips, Expat and FFmpeg inputs).
+# The prebuilt gows-plus release binary is not used. Legacy Dockerfile is preserved;
+# channel homologation remains separate.
+ARG ALPINE_IMAGE
+ARG GOLANG_IMAGE
+ARG NODE_IMAGE
+FROM ${ALPINE_IMAGE} AS expat-package
+RUN apk add --no-cache abuild=3.17.0-r0 build-base=0.5-r4 bash gnupg xz=5.8.4-r0
+WORKDIR /build/expat
+COPY --from=build_recipe expat/APKBUILD ./APKBUILD
+COPY --from=build_recipe trust/expat.gpg ./expat.gpg
+COPY --from=build_sources expat-2.9.0.tar.xz expat-2.9.0.tar.xz.asc ./
+RUN printf '%s  %s\n' '1e6371862cc31999b368c3b89b49994f0677e1bab5f1b2b85ae3741f5d803051' expat-2.9.0.tar.xz | sha256sum -c - \
+    && gpgv --keyring ./expat.gpg expat-2.9.0.tar.xz.asc expat-2.9.0.tar.xz \
+    && PACKAGER='NooviCrew <noovicrew-expat@build.invalid>' abuild-keygen -a -n \
+    && cp /root/.abuild/*.rsa.pub /etc/apk/keys/ \
+    && abuild -F \
+    && mkdir -p /out \
+    && cp /root/packages/build/x86_64/*.apk /out/ \
+    && cp /root/.abuild/*.rsa.pub /out/ \
+    && tar -xOf expat-2.9.0.tar.xz expat-2.9.0/COPYING > /out/COPYING
+
+FROM ${ALPINE_IMAGE} AS vips-package
+COPY --from=expat-package /out/*.rsa.pub /etc/apk/keys/
+COPY --from=expat-package /out/libexpat-2.9.0-r0.apk /out/expat-2.9.0-r0.apk /out/expat-dev-2.9.0-r0.apk /tmp/expat/
+RUN apk add --no-cache /tmp/expat/*.apk abuild=3.17.0-r0 xz=5.8.4-r0
+WORKDIR /build/vips
+COPY --from=build_recipe vips/APKBUILD vips/meson-flags.txt ./
+COPY --from=build_recipe vips/source.json ./vips-source.json
+COPY --from=build_recipe expat/source.json ./expat-source.json
+COPY --from=build_sources vips-8.18.7.tar.xz ./
+RUN printf '%s  %s\n' '5baaead3b0bb20ffdb9e9ff09aa9fda08620923df77b63b436654cb5e0b3bf94' vips-8.18.7.tar.xz | sha256sum -c - \
+    && PACKAGER='NooviCrew <noovicrew-vips@build.invalid>' abuild-keygen -a -n \
+    && cp /root/.abuild/*.rsa.pub /etc/apk/keys/ \
+    && apk update \
+    && abuild -F -r \
+    && mkdir -p /out \
+    && cp /root/packages/build/x86_64/vips-8.18.7-r0.apk /root/packages/build/x86_64/vips-dev-8.18.7-r0.apk /root/packages/build/x86_64/vips-doc-8.18.7-r0.apk /out/ \
+    && cp /root/.abuild/*.rsa.pub /out/ \
+    && cp vips-source.json expat-source.json meson-flags.txt /out/ \
+    && tar -xOf vips-8.18.7.tar.xz vips-8.18.7/LICENSE > /out/LICENSE
+
+FROM ${ALPINE_IMAGE} AS ffmpeg-package
+RUN apk add --no-cache abuild=3.17.0-r0 build-base=0.5-r4 xz=5.8.4-r0 gnupg
+WORKDIR /build/ffmpeg
+COPY --from=build_recipe ffmpeg-waha/APKBUILD ffmpeg-waha/configure-flags.txt ./
+COPY --from=build_recipe ffmpeg-waha/source.json ./ffmpeg-source.json
+COPY --from=build_recipe trust/ffmpeg.gpg ./ffmpeg.gpg
+COPY --from=build_sources ffmpeg-9.0.2.tar.xz ffmpeg-9.0.2.tar.xz.asc ./
+RUN printf '%s  %s\n' '8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e' ffmpeg-9.0.2.tar.xz | sha256sum -c - \
+    && gpgv --keyring ./ffmpeg.gpg ffmpeg-9.0.2.tar.xz.asc ffmpeg-9.0.2.tar.xz \
+    && PACKAGER='NooviCrew <noovicrew-ffmpeg@build.invalid>' abuild-keygen -a -n \
+    && cp /root/.abuild/*.rsa.pub /etc/apk/keys/ \
+    && apk update \
+    && abuild -F -r \
+    && mkdir -p /out \
+    && cp /root/packages/build/x86_64/ffmpeg-9.0.2-r1.apk /out/ \
+    && cp /root/.abuild/*.rsa.pub /out/
+
+# Rebuild the same Node release and ABI against genuine corrected system OpenSSL.
+FROM ${ALPINE_IMAGE} AS node-shared-openssl
+RUN apk add --no-cache build-base=0.5-r4 python3 linux-headers gnupg xz=5.8.4-r0 \
+    libssl3=3.5.9-r0 libcrypto3=3.5.9-r0 openssl-dev=3.5.9-r0
+WORKDIR /source
+COPY --from=build_sources node-v24.21.0.tar.xz node-v24.21.0-SHASUMS256.txt node-v24.21.0-SHASUMS256.txt.sig ./
+COPY --from=build_recipe trust/node.gpg ./node.gpg
+COPY --from=build_recipe node/source.json /usr/share/noovicrew/node-shared-openssl/source.json
+RUN --network=none printf '%s  %s\n' 'a6f54defb6fd7c84f41dba13d61e78e9b4e0961712cf61f29715c05f5ced94fc' node-v24.21.0.tar.xz 'f410428039e2c922a14058df067a4482691c9304a5c01a75847f9f3f2d3307f6' node-v24.21.0-SHASUMS256.txt '865f22b026e4080554e10d247553fd770573893dac8fc7affc7d58b72de35a89' node-v24.21.0-SHASUMS256.txt.sig '067260a186848e8e35937eb8b1a3d5649d204f0153274b5f844b762dc5cea77a' node.gpg | sha256sum -c - \
+    && gpgv --keyring ./node.gpg node-v24.21.0-SHASUMS256.txt.sig node-v24.21.0-SHASUMS256.txt \
+    && grep -Fx 'a6f54defb6fd7c84f41dba13d61e78e9b4e0961712cf61f29715c05f5ced94fc  node-v24.21.0.tar.xz' node-v24.21.0-SHASUMS256.txt \
+    && mkdir -p /usr/src/node \
+    && tar -xJf node-v24.21.0.tar.xz -C /usr/src/node --strip-components=1 \
+    && cd /usr/src/node \
+    && test -f deps/icu-small/README-FULL-ICU.txt \
+    && test -f deps/icu-small/source/data/in/icudt78l.dat.bz2 \
+    && CFLAGS='-O2 -pipe -march=x86-64 -mtune=generic' CXXFLAGS='-O2 -pipe -march=x86-64 -mtune=generic' ./configure --prefix=/usr/local --shared-openssl --shared-openssl-includes=/usr/include --shared-openssl-libpath=/usr/lib \
+    && make -j4 \
+    && make install
+
+# Keep even packaging failures outside the expensive compilation cache boundary.
+RUN --network=none cd /usr/src/node \
+    && cp config.gypi /usr/share/noovicrew/node-shared-openssl/config.gypi \
+    && mkdir -p /out \
+    && cp /usr/local/bin/node /out/node \
+    && cp -a /usr/local/include/node /out/include \
+    && cp LICENSE /out/LICENSE \
+    && cp /usr/share/noovicrew/node-shared-openssl/config.gypi /out/config.gypi
+
+# Cache the completed compilation independently of the proof source and its refusal.
+COPY build/native-tests/check-native.cjs /node-proof.cjs
+RUN --network=none node /node-proof.cjs --node-tls-record > /out/node-provenance.json \
+    || { proof_status=$?; cat /out/node-provenance.json; exit "$proof_status"; }
+
+# gows-plus (Apache-2.0) compiled from the pinned commit 5f093fe7c38c (tag v1.0.49).
+# Inputs: the source tarball from the verified build_sources context (sha256 + embedded
+# commit id), Go modules checked against go.sum and the Go checksum database, and the same
+# Vips/Expat APKs that the runtime installs (bimg links libvips through cgo; go-sqlite3
+# bundles SQLite 3.53.4). Only three modules differ from the upstream go.mod: pgx, grpc and
+# x/net, raised to releases that fix the advisories listed in deploy/build/gows/source.json.
+FROM ${GOLANG_IMAGE} AS gows-binary
+COPY --from=expat-package /out/*.rsa.pub /etc/apk/keys/
+COPY --from=vips-package /out/*.rsa.pub /etc/apk/keys/
+COPY --from=expat-package /out/libexpat-2.9.0-r0.apk /out/expat-2.9.0-r0.apk /out/expat-dev-2.9.0-r0.apk /tmp/native/
+COPY --from=vips-package /out/vips-8.18.7-r0.apk /out/vips-dev-8.18.7-r0.apk /tmp/native/
+RUN apk add --no-cache /tmp/native/*.apk build-base=0.5-r4 pkgconf=2.5.1-r0 git=2.54.0-r0 tar=1.35-r5 protoc=31.1-r1 protobuf-dev=31.1-r1 libssl3=3.5.9-r0 libcrypto3=3.5.9-r0 \
+    && rm -r /tmp/native
+ENV GOTOOLCHAIN=local GOFLAGS=-mod=readonly GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org \
+    CGO_ENABLED=1 CGO_CFLAGS="-O2 -pipe -march=x86-64 -mtune=generic"
+WORKDIR /usr/src
+COPY --from=build_sources gows-plus-5f093fe7c38c41faead8e6ce78ee70cb7f815404.tar.gz ./
+COPY --from=build_recipe gows/source.json /usr/share/noovicrew/gows/source.json
+COPY --from=build_recipe gows/go.mod.overlay gows/go.sum.overlay /usr/share/noovicrew/gows/
+RUN --network=none printf '%s  %s\n' 'dae1189c554dc2ce6c657b13625705f775a52d9ea1a6524a8532c65546b3093b' gows-plus-5f093fe7c38c41faead8e6ce78ee70cb7f815404.tar.gz | sha256sum -c - \
+    && test "$(gzip -dc gows-plus-5f093fe7c38c41faead8e6ce78ee70cb7f815404.tar.gz | git get-tar-commit-id)" = '5f093fe7c38c41faead8e6ce78ee70cb7f815404' \
+    && mkdir gows \
+    && tar -xzf gows-plus-5f093fe7c38c41faead8e6ce78ee70cb7f815404.tar.gz -C gows --strip-components=1 \
+    && cd gows \
+    && printf '%s  %s\n' '680a326a5dd309c607a2c214a64d2d052a9330358b1597eee8636f54ec268958' src/go.mod '1d5a921b9c03bb57f8ee1dd2e7cfd83b02022811cb8ad5b929ce4e8a1a9aae96' src/go.sum 'c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4' LICENSE | sha256sum -c - \
+    && cp /usr/share/noovicrew/gows/go.mod.overlay src/go.mod \
+    && cp /usr/share/noovicrew/gows/go.sum.overlay src/go.sum \
+    && printf '%s  %s\n' 'eccf32fe2e52dd45b57cb22be8ca5fa8f3c3c098119b8bd0d05615ce4696ef2b' src/go.mod '3030bed948e8271bb1ab69f0365517c2304bd2d2a76930ccb1837f4daea28cbf' src/go.sum | sha256sum -c -
+# Pinned generators: protoc 31.1 (APK) with protoc-gen-go matching the protobuf module in go.mod.
+RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12 \
+    && go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.2
+WORKDIR /usr/src/gows
+RUN cd src && go mod download && go mod verify \
+    && cd .. && mkdir -p src/proto \
+    && protoc -I=. --go_out=./src/proto --go-grpc_out=./src/proto --experimental_allow_proto3_optional proto/*.proto
+# Compilation is separate from the proof so a refused proof does not discard the build cache.
+RUN cd src && mkdir -p /out && go build -p 2 -trimpath -buildvcs=false -ldflags='-s -w -buildid=' -o /out/gows .
+RUN --network=none cd /usr/src/gows \
+    && go version -m /out/gows > /out/gows-buildinfo.txt \
+    && grep -Eq '^[[:space:]]+build[[:space:]]+CGO_ENABLED=1$' /out/gows-buildinfo.txt \
+    && grep -Eq '^[[:space:]]+dep[[:space:]]+google.golang.org/grpc[[:space:]]+v1\.83\.2[[:space:]]' /out/gows-buildinfo.txt \
+    && grep -Eq '^[[:space:]]+dep[[:space:]]+github.com/jackc/pgx/v5[[:space:]]+v5\.9\.2[[:space:]]' /out/gows-buildinfo.txt \
+    && grep -Eq '^[[:space:]]+dep[[:space:]]+golang.org/x/net[[:space:]]+v0\.60\.0[[:space:]]' /out/gows-buildinfo.txt \
+    && readelf -d /out/gows | grep NEEDED > /out/gows-needed.txt \
+    && ! grep -Eq 'libc\.so\.6|ld-linux' /out/gows-needed.txt \
+    && grep -q 'libvips\.so' /out/gows-needed.txt \
+    && ldd /out/gows > /out/gows-ldd.txt \
+    && ! grep -Eiq 'not found|Error loading' /out/gows-ldd.txt \
+    && cp LICENSE /out/LICENSE \
+    && cp src/go.mod src/go.sum /out/
+
+FROM ${NODE_IMAGE} AS build
+ENV PUPPETEER_SKIP_DOWNLOAD=True PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=True \
+    YARN_CHECKSUM_BEHAVIOR=throw YARN_ENABLE_IMMUTABLE_INSTALLS=true
+COPY --from=expat-package /out/*.rsa.pub /etc/apk/keys/
+COPY --from=vips-package /out/*.rsa.pub /etc/apk/keys/
+COPY --from=expat-package /out/libexpat-2.9.0-r0.apk /out/expat-2.9.0-r0.apk /out/expat-dev-2.9.0-r0.apk /tmp/native/
+COPY --from=vips-package /out/vips-8.18.7-r0.apk /out/vips-dev-8.18.7-r0.apk /tmp/native/
+COPY --from=node-shared-openssl /out/node /usr/local/bin/node
+RUN test -d /usr/local/include/node && rm -r /usr/local/include/node
+COPY --from=node-shared-openssl /out/include/ /usr/local/include/node/
+RUN apk add --no-cache /tmp/native/*.apk git python3 build-base=0.5-r4 pkgconf=2.5.1-r0 libssl3=3.5.9-r0 libcrypto3=3.5.9-r0
+WORKDIR /build-tools
+COPY build/native-tests/builder-tools.package.json ./package.json
+RUN npm install --no-audit --no-fund \
+    && node -e 'if(require("node-gyp/package.json").version!=="12.4.0"||require("node-addon-api/package.json").version!=="8.9.2")process.exit(1)'
+WORKDIR /app
+COPY . ./
+COPY package.json yarn.lock ./
+COPY build/runtime-profiles/gows.ts ./src/core/runtime-engine-profile.ts
+COPY build/native-tests/inventory.cjs /inventory.cjs
+RUN corepack yarn install --immutable --check-cache \
+    && sha256sum package.json yarn.lock > /tmp/descriptor-lock.sha256 \
+    && corepack yarn build \
+    && mkdir -p /proofs \
+    && node /inventory.cjs > /proofs/node-packages-before-focus.json \
+    && corepack yarn workspaces focus --all --production \
+    && sha256sum -c /tmp/descriptor-lock.sha256 \
+    && node /inventory.cjs > /proofs/node-packages-runtime.json
+# Only these two builder-tool symlinks are introduced, then removed. The genuine
+# production dependency graph and all engine import libraries remain intact.
+RUN mkdir -p node_modules/sharp/node_modules \
+    && test ! -e node_modules/sharp/node_modules/node-addon-api \
+    && test ! -e node_modules/sharp/node_modules/node-gyp \
+    && ln -s /build-tools/node_modules/node-addon-api node_modules/sharp/node_modules/node-addon-api \
+    && ln -s /build-tools/node_modules/node-gyp node_modules/sharp/node_modules/node-gyp \
+    && cd /app/node_modules/sharp \
+    && PATH="/build-tools/node_modules/.bin:$PATH" CFLAGS="-O2 -pipe -march=x86-64 -mtune=generic" CXXFLAGS="-O2 -pipe -march=x86-64 -mtune=generic" SHARP_FORCE_GLOBAL_LIBVIPS=1 node install/build.js \
+    && rm node_modules/node-addon-api node_modules/node-gyp \
+    && cd /app \
+    && cp /build-tools/package.json /proofs/native-builder-tools.package.json \
+    && cp /build-tools/package-lock.json /proofs/native-builder-tools.package-lock.json \
+    && cp package.json yarn.lock /proofs/
+
+FROM ${NODE_IMAGE} AS app-runtime
+ARG SOURCE_COMMIT
+LABEL org.opencontainers.image.revision=$SOURCE_COMMIT \
+    io.noovicrew.waha.fork-source=$SOURCE_COMMIT \
+    io.noovicrew.waha.runtime-engine="GOWS" \
+    io.noovicrew.waha.gows-source="devlikeapro/gows-plus@5f093fe7c38c41faead8e6ce78ee70cb7f815404" \
+    io.noovicrew.waha.profile-status="unhomologated"
+ENV WHATSAPP_DEFAULT_ENGINE=GOWS WAHA_RUN_XVFB=false \
+    WAHA_GOWS_PATH=/app/gows WAHA_GOWS_SOCKET=/tmp/gows.sock GODEBUG=netdns=cgo \
+    PUPPETEER_SKIP_DOWNLOAD=True PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=True \
+    NODE_OPTIONS="--max-old-space-size=1536" \
+    CHOKIDAR_USEPOLLING=1 CHOKIDAR_INTERVAL=5000
+COPY --from=expat-package /out/*.rsa.pub /etc/apk/keys/
+COPY --from=vips-package /out/*.rsa.pub /etc/apk/keys/
+COPY --from=ffmpeg-package /out/*.rsa.pub /etc/apk/keys/
+COPY --from=expat-package /out/libexpat-2.9.0-r0.apk /tmp/native/
+COPY --from=vips-package /out/vips-8.18.7-r0.apk /out/vips-doc-8.18.7-r0.apk /tmp/native/
+COPY --from=ffmpeg-package /out/ffmpeg-9.0.2-r1.apk /tmp/native/
+COPY --from=node-shared-openssl /out/node /usr/local/bin/node
+RUN test -d /usr/local/include/node && rm -r /usr/local/include/node
+COPY --from=node-shared-openssl /out/include/ /usr/local/include/node/
+RUN apk add --no-cache /tmp/native/*.apk opustags=1.10.1-r0 tini=0.19.0-r3 ca-certificates libssl3=3.5.9-r0 libcrypto3=3.5.9-r0 \
+    && rm -r /tmp/native \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /opt/yarn-v1.22.22 \
+    && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/pnpm /usr/local/bin/pnpx /usr/local/bin/yarn /usr/local/bin/yarnpkg
+WORKDIR /app
+COPY --from=build /app/package.json /app/yarn.lock ./
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+COPY LICENSE ./LICENSE
+COPY scripts/init-waha.js ./scripts/init-waha.js
+COPY build/runtime-profiles/gows.env.example ./.env.example
+COPY scripts/entrypoint-gows.sh /entrypoint.sh
+COPY --from=gows-binary /out/gows /app/gows
+COPY --from=gows-binary /out/LICENSE /out/gows-buildinfo.txt /out/gows-needed.txt /out/gows-ldd.txt /out/go.mod /out/go.sum /usr/share/noovicrew/gows/
+COPY --from=build_recipe gows/source.json /usr/share/noovicrew/gows/source.json
+COPY --from=build /proofs/ /usr/share/noovicrew/build-provenance/
+COPY --from=build_recipe node/source.json /usr/share/noovicrew/node-shared-openssl/source.json
+COPY --from=node-shared-openssl /out/node-provenance.json /usr/share/noovicrew/node-shared-openssl/provenance.json
+COPY --from=node-shared-openssl /out/config.gypi /usr/share/noovicrew/node-shared-openssl/config.gypi
+COPY --from=node-shared-openssl /out/LICENSE /usr/share/noovicrew/node-shared-openssl/LICENSE
+COPY build/native-tests/check-native.cjs /usr/share/noovicrew/node-shared-openssl/check-native.cjs
+RUN chmod +x /entrypoint.sh ./scripts/init-waha.js \
+    && printf '%s\n' '#!/bin/sh' 'exec node /app/scripts/init-waha.js "$@"' > /usr/local/bin/init-waha \
+    && chmod +x /usr/local/bin/init-waha
+EXPOSE 3000
+ENTRYPOINT ["/sbin/tini", "--", "/entrypoint.sh"]
+
+FROM app-runtime AS checks
+COPY build/native-tests/check-native.cjs build/native-tests/crypto-vectors.cjs ./noovicrew-tests/
+ENV NOOVICREW_WAHA_PROFILE=GOWS
+RUN --network=none mkdir /proofs \
+    && (node /app/noovicrew-tests/check-native.cjs > /proofs/native-checks.json \
+        || { check_status=$?; cat /proofs/native-checks.json; exit "$check_status"; }) \
+    && node /app/noovicrew-tests/crypto-vectors.cjs > /proofs/crypto-vectors.json \
+    && (node /usr/share/noovicrew/node-shared-openssl/check-native.cjs --node-tls-check > /proofs/node-tls.json \
+        || { check_status=$?; cat /proofs/node-tls.json; exit "$check_status"; })
+
+FROM app-runtime AS runtime-prototype
+COPY --from=checks /proofs/ /usr/share/noovicrew/offline-checks/

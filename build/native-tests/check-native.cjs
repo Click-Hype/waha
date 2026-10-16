@@ -204,24 +204,28 @@ function nodeTlsSameProvenance(actual, stored) {
 
 async function main() {
   fact(process.version === 'v24.21.0' && process.arch === 'x64' && process.platform === 'linux');
-  process.env.WHATSAPP_DEFAULT_ENGINE = 'NOWEB';
+  // The recipe states which compiled profile it expects; NOWEB stays the default.
+  const engineName = process.env.NOOVICREW_WAHA_PROFILE || 'NOWEB';
+  fact(engineName === 'NOWEB' || engineName === 'GOWS');
+  const refusedEngines = ['GOWS', 'NOWEB', 'WEBJS', 'WPP'].filter(name => name !== engineName);
+  process.env.WHATSAPP_DEFAULT_ENGINE = engineName;
   const profile = require('/app/dist/core/runtime-engine-profile');
   const config = require('/app/dist/config');
-  await check('noweb-only-compiled-profile', async () => {
+  await check(engineName.toLowerCase() + '-only-compiled-profile', async () => {
     fact(profile.RESTRICTED_ENGINE_PROFILE === true);
-    fact(JSON.stringify(profile.SUPPORTED_ENGINES) === '["NOWEB"]');
-    fact(profile.DEFAULT_ENGINE === 'NOWEB');
+    fact(JSON.stringify(profile.SUPPORTED_ENGINES) === JSON.stringify([engineName]));
+    fact(profile.DEFAULT_ENGINE === engineName);
     delete process.env.WHATSAPP_DEFAULT_ENGINE;
-    fact(config.getEngineName() === 'NOWEB');
-    for (const engine of ['GOWS', 'WEBJS', 'WPP', 'invalid', 'noweb']) {
+    fact(config.getEngineName() === engineName);
+    for (const engine of [...refusedEngines, 'invalid', engineName.toLowerCase()]) {
       process.env.WHATSAPP_DEFAULT_ENGINE = engine;
       denies(() => config.getEngineName());
       denies(() => profile.requireEngineAvailable(engine));
     }
-    process.env.WHATSAPP_DEFAULT_ENGINE = 'NOWEB';
+    process.env.WHATSAPP_DEFAULT_ENGINE = engineName;
     const { VERSION } = require('/app/dist/version');
-    fact(VERSION.engine === 'NOWEB');
-    fact(JSON.stringify(VERSION.supportedEngines) === '["NOWEB"]');
+    fact(VERSION.engine === engineName);
+    fact(JSON.stringify(VERSION.supportedEngines) === JSON.stringify([engineName]));
     fact(VERSION.browser === null);
     // Canonical factory guards unsupported engines before selecting a session.
     const { SessionManagerCore } = require('/app/dist/core/manager.core');
@@ -230,13 +234,13 @@ async function main() {
     let transportCalls = 0;
     Socket.prototype.connect = function () { transportCalls++; throw new Error('offline-transport-refused'); };
     try {
-      for (const engine of ['GOWS', 'WEBJS', 'WPP', 'unknown']) {
+      for (const engine of [...refusedEngines, 'unknown']) {
         denies(() => SessionManagerCore.prototype.getEngine.call({}, engine));
       }
-      fact(typeof SessionManagerCore.prototype.getEngine.call({}, 'NOWEB') === 'function');
+      fact(typeof SessionManagerCore.prototype.getEngine.call({}, engineName) === 'function');
       fact(transportCalls === 0);
     } finally { Socket.prototype.connect = savedConnect; }
-    for (const engine of ['GOWS', 'WEBJS', 'WPP', 'unknown']) {
+    for (const engine of [...refusedEngines, 'unknown']) {
       const refused = spawnSync('/entrypoint.sh', [], { encoding: 'utf8',
         env: { PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', WHATSAPP_DEFAULT_ENGINE: engine } });
       fact(refused.status === 64 && refused.stdout === '');
@@ -280,7 +284,7 @@ async function main() {
       // The classic `sqlite3` package (bundled SQLite 3.44.2) must not ship at all.
       fact(!fsSync.existsSync('/app/node_modules/sqlite3'));
     });
-    await check('noweb-sqlite-migrations-reopen', async () => {
+    if (engineName === 'NOWEB') await check('noweb-sqlite-migrations-reopen', async () => {
       const esm = require('/app/dist/vendor/esm');
       await esm.loadESMModules();
       const { Sqlite3Storage } = require('/app/dist/core/engines/noweb/store/sqlite3/Sqlite3Storage');
@@ -336,13 +340,42 @@ async function main() {
       fact(track.codec_name === 'h264' && track.pix_fmt === 'yuv420p' && track.width === 34 && track.height === 26);
       mediaSubstep = null;
     });
+    if (engineName === 'GOWS') await check('gows-binary-linkage-and-smoke', async () => {
+      const binary = '/app/gows';
+      const bytes = fsSync.readFileSync(binary);
+      fact(bytes.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46])) && bytes[4] === 2 && bytes.readUInt16LE(18) === 62);
+      fact((fsSync.statSync(binary).mode & 0o111) !== 0);
+      // Every dynamic dependency resolves in this image, and none is a glibc loader.
+      const linkage = spawnSync('ldd', [binary], { encoding: 'utf8' });
+      fact(!linkage.error && linkage.status === 0 && !/not found/.test(linkage.stdout + linkage.stderr));
+      fact(!/ld-linux|libc\.so\.6/.test(linkage.stdout));
+      fact(/\/usr\/lib\/libvips\.so/.test(linkage.stdout));
+      // Offline smoke: the server opens only a unix socket in a private directory and announces readiness.
+      const socket = path.join(directory, 'gows.sock');
+      const ready = await new Promise(resolve => {
+        const child = require('node:child_process').spawn(binary, ['--socket', socket], {
+          env: { PATH: process.env.PATH, HOME: directory, TMPDIR: directory }, stdio: ['ignore', 'pipe', 'ignore'] });
+        let seen = false;
+        const finish = value => { clearTimeout(timer); child.kill('SIGKILL'); resolve(value); };
+        const timer = setTimeout(() => finish(false), 20000);
+        child.stdout.on('data', chunk => {
+          if (!seen && chunk.toString().includes('gRPC server started!')) { seen = true; finish(fsSync.existsSync(socket)); }
+        });
+        child.on('error', () => finish(false));
+        child.on('exit', () => finish(seen));
+      });
+      fact(ready === true);
+    });
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
   await check('runtime-has-no-global-installers', async () => {
     for (const executable of ['npm', 'npx', 'corepack', 'yarn', 'yarnpkg']) {
       const r = spawnSync('sh', ['-c', 'command -v "$1"', 'check', executable], { encoding: 'utf8' });
       fact(r.status === 127 || r.status === 1);
     }
-    for (const missing of ['/build-tools', '/root/.abuild', '/app/gows']) {
+    // The NOWEB artifact must not carry the GOWS binary; the GOWS artifact must.
+    const absentPaths = ['/build-tools', '/root/.abuild', '/usr/src/gows'];
+    if (engineName === 'NOWEB') absentPaths.push('/app/gows');
+    for (const missing of absentPaths) {
       let absent = false;
       try { await fs.stat(missing); } catch (error) { absent = error.code === 'ENOENT'; }
       fact(absent);
